@@ -74,7 +74,9 @@ begin
     pc_proc: process (CLK, RESET)
     begin
         -- Increment or decrement counter
-        if CLK'event and CLK='1' then
+        if RESET='1' then
+            pc <= (others => '0');
+        elsif rising_edge(CLK) then
             if pc_inc='1' then
                 if pc=8191 then -- Memory loop
                     pc <= (others => '0');
@@ -88,8 +90,6 @@ begin
                     pc <= pc - 1;
                 end if;
             end if;
-        elsif RESET='1' then
-            pc <= (others => '0');
         end if;
     end process;
 
@@ -98,14 +98,14 @@ begin
     -- PTR
     ptr_proc: process (CLK, RESET)
     begin
-        if CLK'event and CLK='1' then
+        if RESET='1' then
+            ptr <= (others => '0');
+        elsif rising_edge(CLK) then
             if ptr_inc='1' then
                 ptr <= ptr + 1;
             elsif ptr_dec='1' then
                 ptr <= ptr - 1;
             end if;
-        elsif RESET='1' then
-            ptr <= (others => '0');
         end if;
     end process;
     
@@ -113,12 +113,12 @@ begin
     -- TMP
     tmp_proc: process (CLK, RESET)
     begin
-        if CLK'event and CLK='1' then
+        if RESET = '1' then
+          tmp <= (others => '0');
+        elsif rising_edge(CLK) then
             if tmp_ld='1' then
                 tmp <= DATA_RDATA; 
             end if;
-        elsif RESET = '1' then
-          tmp <= (others => '0');
         end if;
     end process;
 
@@ -156,7 +156,7 @@ begin
     begin
       if RESET='1' then
         pstate <= s_idle;
-      elsif CLK'event and CLK='1' then
+      elsif rising_edge(CLK) then
         if EN='1' then
           pstate <= nstate;
         end if;
