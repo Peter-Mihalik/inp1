@@ -1,3 +1,4 @@
+
 -- cpu.vhd: Simple 8-bit CPU (BrainFuck interpreter)
 -- Copyright (C) 2024 Brno University of Technology,
 --                    Faculty of Information Technology
@@ -47,11 +48,11 @@ end cpu;
 -- ----------------------------------------------------------------------------
 architecture behavioral of cpu is
     -- PC Signals
-    signal pc: std_logic_vector(12 downto 0);
+    signal pc: std_logic_vector(12 downto 0) := (others => '0');
     signal pc_inc: std_logic;
     signal pc_dec: std_logic;
     -- PTR Signals
-    signal ptr: std_logic_vector(12 downto 0);
+    signal ptr: std_logic_vector(12 downto 0) := (others => '0');
     signal ptr_inc: std_logic;
     signal ptr_dec: std_logic;
     -- TMP
@@ -60,11 +61,13 @@ architecture behavioral of cpu is
     -- MUX1
     signal mux1_sel: std_logic;
     signal mux2_sel: std_logic_vector(1 downto 0);
-    -- DEC
-    type inst_type is (i_ptr_inc, i_ptr_dec, i_mem_inc, i_mem_dec, i_right_brac, 
-        i_left_brac, i_tmp_load, i_tmp_store, i_mem_print, i_mem_scan, i_separ_term, i_nop);
-    signal inst: inst_type;
     -- FSM
+    type state_type is (s_idle, s_load, s_read_sep, s_fetch, s_decode, s_ptr_inc, s_ptr_dec, s_mem_inc, s_mem_dec,
+    s_read_mem, s_tmp_load, s_tmp_store, s_out_busy, s_print, s_in_req, s_in_store, s_jmp_f, s_jmp_b, s_left_bracket, 
+    s_right_bracket, s_wait_left_bracket, s_wait_right_bracket, s_halt);
+    signal pstate: state_type := s_idle;
+    signal nstate: state_type;
+    signal found_sep: std_logic;
 
 begin
     -- PC
@@ -76,7 +79,7 @@ begin
                 if pc=8191 then -- Memory loop
                     pc <= (others => '0');
                 else
-                    pc <= pc + 1;
+                    pc <= pc + 1; 
                 end if;
             elsif pc_dec='1' then
                 if pc=0 then -- Memory loop
@@ -88,8 +91,9 @@ begin
         elsif RESET='1' then
             pc <= (others => '0');
         end if;
-
     end process;
+
+
 
     -- PTR
     ptr_proc: process (CLK, RESET)
@@ -107,13 +111,21 @@ begin
     
 
     -- TMP
-    tmp_proc: process (CLK)
+    tmp_proc: process (CLK, RESET)
     begin
         if CLK'event and CLK='1' then
             if tmp_ld='1' then
                 tmp <= DATA_RDATA; 
             end if;
+        elsif RESET = '1' then
+          tmp <= (others => '0');
         end if;
+    end process;
+
+    -- CNT
+    cnt_reg_proc: process (CLK, RESET)
+    begin
+      
     end process;
     
     -- MUX1
@@ -138,23 +150,249 @@ begin
         end case;
     end process;
 
-    -- Decoder
-    decode: process (DATA_RDATA)
+    -- FSM
+    -- State Register
+    state_reg_proc: process (CLK, RESET)
     begin
-        case DATA_RDATA is
-            when X"3E" => inst <= i_ptr_inc;
-            when X"3C" => inst <= i_ptr_dec;
-            when X"2B" => inst <= i_mem_inc;
-            when X"2D" => inst <= i_mem_dec;
-            when X"5B" => inst <= i_right_brac;
-            when X"5D" => inst <= i_left_brac;
-            when X"24" => inst <= i_tmp_load;
-            when X"21" => inst <= i_tmp_store;
-            when X"2E" => inst <= i_mem_print;
-            when X"2C" => inst <= i_mem_scan;
-            when X"40" => inst <= i_separ_term;
-            when others => inst <= i_nop;
+      if RESET='1' then
+        pstate <= s_idle;
+      elsif CLK'event and CLK='1' then
+        if EN='1' then
+          pstate <= nstate;
+        end if;
+      end if;
+    end process;
+
+    -- Next State Logic
+    nstate_log_proc: process (pstate, EN, DATA_RDATA, OUT_BUSY, IN_DATA)
+    begin
+      -- INIT
+      pc_inc <= '0';
+      pc_dec <= '0';
+      ptr_inc <= '0';
+      ptr_dec <= '0';
+      DATA_EN <= '0';
+      DATA_RDWR <= '0';
+      mux1_sel <= '0';
+      mux2_sel <= "00";
+      tmp_ld <= '0';
+      OUT_WE <= '0';
+      OUT_DATA <= X"00";
+      OUT_INV <= '1';
+      IN_REQ <= '0';
+
+      case pstate is
+        -- IDLE
+        when s_idle =>
+          READY <= '0';
+          DONE <= '0';
+          
+          if EN='1' then
+            nstate <= s_load;
+          else
+            nstate <= s_idle;
+          end if;
+          
+        -- Load program - find separator and set PTR
+        when s_load =>
+          DATA_RDWR <= '1';
+          DATA_EN <= '1';
+          mux1_sel <= '0';
+          nstate <= s_read_sep;
+
+        -- READ SEPARATOR
+        when s_read_sep =>
+            ptr_inc <= '1';
+          if DATA_RDATA=X"40" then
+            READY <= '1';
+            nstate <= s_fetch;
+          else
+            nstate <= s_load;
+          end if;
+
+        -- FETCH
+        when s_fetch =>
+          DATA_RDWR <= '1';
+          DATA_EN <= '1';
+          mux1_sel <= '1';
+          nstate <= s_decode;
+
+
+        -- DECODE
+        when s_decode =>
+          case DATA_RDATA is
+           when X"3E" => nstate <= s_ptr_inc;
+           when X"3C" => nstate <= s_ptr_dec;
+           when X"2B" => nstate <= s_read_mem;
+           when X"2D" => nstate <= s_read_mem;
+           when X"5B" => nstate <= s_read_mem;
+           when X"5D" => nstate <= s_read_mem;
+           when X"24" => nstate <= s_read_mem;
+           when X"21" => nstate <= s_tmp_store;
+           when X"2E" => nstate <= s_out_busy;
+           when X"2C" => nstate <= s_in_req;
+            when X"40" => 
+              nstate <= s_halt;
+            when others => 
+              pc_inc <= '1';
+              nstate <= s_fetch;
+          end case;  
+
+        -- HALT
+        when s_halt =>
+          DONE <= '1';
+          if RESET='1' then
+            nstate <= s_idle;
+          else
+            nstate <= s_halt;
+          end if;
+
+        -- PTR Increment
+        when s_ptr_inc =>
+          ptr_inc <= '1';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+        -- PTR Decrement
+        when s_ptr_dec =>
+          ptr_dec <= '1';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+        -- Read From memory
+        when s_read_mem =>
+          DATA_RDWR <= '1';
+          DATA_EN <= '1';
+          mux1_sel <= '0'; -- read from ptr
+          if DATA_RDATA = X"2B" then
+            nstate <= s_mem_inc;
+          elsif DATA_RDATA = X"2D" then
+            nstate <= s_mem_dec;
+          elsif DATA_RDATA = X"24" then
+            nstate <= s_tmp_load;
+          elsif DATA_RDATA = X"2E" then
+            nstate <= s_print;
+          elsif DATA_RDATA = X"5B" then
+            nstate <= s_left_bracket;
+          elsif DATA_RDATA = X"5D" then
+            nstate <= s_right_bracket;
+          end if;
+
+        -- LOOPS
+        -- [
+        when s_left_bracket =>
+            pc_inc <= '1';
+          if DATA_RDATA = X"00" then
+            nstate <= s_jmp_f;
+          else 
+            nstate <= s_fetch;
+          end if;
+        when s_jmp_f =>
+          -- fetch and dont execute
+          DATA_EN <= '1';
+          DATA_RDWR <= '1';
+          mux1_sel <= '1'; -- pc (instruction is read)
+          nstate <= s_wait_right_bracket;
+        when s_wait_right_bracket =>
+          pc_inc <= '1';
+          if DATA_RDATA = X"5D" then
+            nstate <= s_fetch;
+          else
+            nstate <= s_jmp_f;
+          end if;
+
+        -- ]
+        when s_right_bracket =>
+          if DATA_RDATA = X"00" then
+            pc_inc <= '1';
+            nstate <= s_fetch;
+          else
+            pc_dec <= '1';
+            nstate <= s_jmp_b;
+          end if;
+        when s_jmp_b =>
+          DATA_EN <= '1';
+          DATA_RDWR <= '1';
+          mux1_sel <= '1';
+          nstate <= s_wait_left_bracket;
+        when s_wait_left_bracket =>
+          if DATA_RDATA = X"5B" then
+            pc_inc <= '1';
+            nstate <= s_fetch;
+          else 
+            pc_dec <= '1';
+            nstate <= s_jmp_b;
+          end if;
+
+        -- MEM Increment
+        when s_mem_inc =>
+          mux1_sel <= '0';
+          mux2_sel <= "11";
+          DATA_EN <= '1';
+          DATA_RDWR <= '0';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+        -- MEM Decrement
+        when s_mem_dec =>
+          mux1_sel <= '0';
+          mux2_sel <= "10";
+          DATA_EN <= '1';
+          DATA_RDWR <= '0';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+        -- Load into TMP
+        when s_tmp_load =>
+          tmp_ld <= '1';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+        -- Store TMP in memory
+        when s_tmp_store =>
+          mux1_sel <= '0';
+          mux2_sel <= "01";
+          DATA_EN <= '1';
+          DATA_RDWR <= '0';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+        
+        -- Print memory
+        when s_out_busy =>
+          if OUT_BUSY = '1' then
+            nstate <= s_out_busy;
+          elsif OUT_BUSY = '0' then
+            nstate <= s_read_mem;
+          end if;
+        when s_print =>
+          OUT_WE <= '1';
+          OUT_INV <= '0';
+          OUT_DATA <= DATA_RDATA;
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+        -- Store Input
+        when s_in_req =>
+          IN_REQ <= '1';
+          if IN_VLD = '0' then
+            nstate <= s_in_req;
+          elsif IN_VLD = '1' then
+            nstate <= s_in_store;
+          end if;
+        when s_in_store =>
+          mux1_sel <= '0';
+          mux2_sel <= "00";
+          DATA_EN <= '1';
+          DATA_RDWR <= '0';
+          pc_inc <= '1';
+          nstate <= s_fetch;
+
+
+          
+              
         end case;
+      
+
     end process;
 
 
