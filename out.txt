@@ -1,0 +1,13 @@
+/usr/local/share/ghdl/bin/ghdl -i --ieee=synopsys -fexplicit --workdir=build --work=work ../src/cpu.vhd
+/usr/local/share/ghdl/bin/ghdl -m --ieee=synopsys -fexplicit --workdir=build -Pbuild --work=work cpu
+/usr/local/share/ghdl/bin/ghdl --synth --latches --ieee=synopsys -fexplicit --workdir=build --out=raw-vhdl --work=work cpu >build/cpu_synth.vhd
+../src/cpu.vhd:77:9: clocked logic requires clocked logic on else part
+        if CLK'event and CLK='1' then
+        ^
+../src/cpu.vhd:101:9: clocked logic requires clocked logic on else part
+        if CLK'event and CLK='1' then
+        ^
+../src/cpu.vhd:116:9: clocked logic requires clocked logic on else part
+        if CLK'event and CLK='1' then
+        ^
+make: *** [Makefile:51: build/cpu_synth.vhd] Error 1
