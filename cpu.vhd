@@ -61,6 +61,12 @@ architecture behavioral of cpu is
     -- MUX1
     signal mux1_sel: std_logic;
     signal mux2_sel: std_logic_vector(1 downto 0);
+    -- CNT
+    signal cnt: std_logic_vector(7 downto 0);
+    signal cnt_inc: std_logic;
+    signal cnt_dec: std_logic;
+    signal cnt_init: std_logic;
+
     -- FSM
     type state_type is (s_idle, s_load, s_read_sep, s_fetch, s_decode, s_ptr_inc, s_ptr_dec, s_mem_inc, s_mem_dec,
     s_read_mem, s_tmp_load, s_tmp_store, s_out_busy, s_print, s_in_req, s_in_store, s_jmp_f, s_jmp_b, s_left_bracket, 
@@ -125,7 +131,17 @@ begin
     -- CNT
     cnt_reg_proc: process (CLK, RESET)
     begin
-      
+      if RESET = '1' then
+        cnt <= (others => '0');
+      elsif rising_edge(CLK) then
+        if cnt_inc = '1' then
+          cnt <= cnt + 1;
+        elsif cnt_dec = '1' then
+          cnt <= cnt - 1;
+        elsif cnt_init = '1' then
+          cnt <= X"01";
+        end if;
+      end if;
     end process;
     
     -- MUX1
@@ -180,6 +196,10 @@ begin
       OUT_DATA <= X"00";
       OUT_INV <= '1';
       IN_REQ <= '0';
+      cnt_dec <= '0';
+      cnt_inc <= '0';
+      cnt_init <= '0';
+
 
       case pstate is
         -- IDLE
@@ -283,6 +303,7 @@ begin
         when s_left_bracket =>
             pc_inc <= '1';
           if DATA_RDATA = X"00" then
+            cnt_init <= '1';
             nstate <= s_jmp_f;
           else 
             nstate <= s_fetch;
@@ -292,22 +313,28 @@ begin
           DATA_EN <= '1';
           DATA_RDWR <= '1';
           mux1_sel <= '1'; -- pc (instruction is read)
-          nstate <= s_wait_right_bracket;
+          nstate <= s_wait_right_bracket; -- c <= mem[pc]
         when s_wait_right_bracket =>
           pc_inc <= '1';
-          if DATA_RDATA = X"5D" then
+          if cnt = X"0" then
             nstate <= s_fetch;
           else
             nstate <= s_jmp_f;
+            if DATA_RDATA = X"5B" then
+              cnt_inc <= '1';
+            elsif DATA_RDATA = X"5D" then
+              cnt_dec <= '1';
+            end if;
           end if;
 
         -- ]
         when s_right_bracket =>
-          if DATA_RDATA = X"00" then
+          if DATA_RDATA = X"00" then -- if(mem[ptr] == 1)
             pc_inc <= '1';
             nstate <= s_fetch;
           else
             pc_dec <= '1';
+            cnt_init <= '1';
             nstate <= s_jmp_b;
           end if;
         when s_jmp_b =>
@@ -316,13 +343,18 @@ begin
           mux1_sel <= '1';
           nstate <= s_wait_left_bracket;
         when s_wait_left_bracket =>
-          if DATA_RDATA = X"5B" then
+          if cnt = X"00" then
             pc_inc <= '1';
             nstate <= s_fetch;
-          else 
+          else
             pc_dec <= '1';
             nstate <= s_jmp_b;
-          end if;
+            if DATA_RDATA = X"5B" then
+              cnt_dec <= '1';
+            elsif DATA_RDATA = X"5D" then 
+              cnt_inc <= '1';
+            end if;
+        end if;
 
         -- MEM Increment
         when s_mem_inc =>
